@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Photo Splitter Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121212; it 
+            --bg-panel: #1e1e1e;
+            --accent: #339af0;
+            --border: #2c2c2c;
+        }
+        
+        body {
+            background-color: var(--bg-dark);
+            color: #e0e0e0;
+            font-family: -apple-system, system-ui, sans-serif;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin: 0;
+        }
+        
+        .tab-content { 
+            display: none; 
+            height: 100%; 
+            width: 100%;
+            overflow: hidden;
+        }
+        .tab-content.active { 
+            display: flex; 
+            flex-direction: column; 
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #0b0b0b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+            touch-action: auto;
+            padding: 40px;
+        }
+
+        .canvas-container.tool-active {
+            touch-action: none;
+        }
+
+        #image-wrapper {
+            position: relative;
+            display: inline-block;
+            box-shadow: 0 0 60px rgba(0,0,0,0.9);
+            background: #1a1a1a;
+        }
+
+        .split-line {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+        .split-line.v { width: 1.5px; height: 100%; top: 0; }
+        .split-line.h { height: 1.5px; width: 100%; left: 0; }
+
+        .preview-line {
+            position: absolute;
+            pointer-events: none;
+            z-index: 50;
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            display: none;
+        }
+        .preview-line.v { width: 2.5px; height: 100%; top: 0; }
+        .preview-line.h { height: 2.5px; width: 100%; left: 0; }
+
+        #pos-tip {
+            position: absolute;
+            background: var(--accent);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 900;
+            pointer-events: none;
+            z-index: 60;
+            display: none;
+            white-space: nowrap;
+            transform: translate(-50%, -100%);
+            margin-top: -12px;
+        }
+
+        .btn-tool {
+            background: #2a2a2a;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+            color: #777;
+        }
+        .btn-tool.active {
+            border-color: var(--accent);
+            background: rgba(51, 154, 240, 0.15);
+            color: var(--accent);
+        }
+
+        .mobile-nav {
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        #overlay {
+            -webkit-tap-highlight-color: transparent;
+            z-index: 45;
+        }
+        
+        #overlay.view-mode {
+            pointer-events: none;
+        }
+
+        /* Segment Preview Container Fixes */
+        .segment-card {
+            background: #1a1a1a;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+        .segment-img-container {
+            width: 100%;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .segment-card canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="h-14 border-b border-border bg-[#1e1e1e] flex items-center justify-between px-4 shrink-0 z-50">
+        <div class="flex items-center gap-2">
+            <i class="fa-solid fa-scissors text-blue-400"></i>
+            <h1 class="text-sm font-bold tracking-tight">Splitter Pro</h1>
+        </div>
+        <button onclick="document.getElementById('file-input').click()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95">
+            <i class="fa-solid fa-plus mr-1"></i> Load Image
+        </button>
+        <input type="file" id="file-input" class="hidden" accept="image/*">
+    </header>
+
+    <div class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        <aside class="w-72 bg-[#1e1e1e] border-r border-border p-4 shrink-0 overflow-y-auto hidden md:block">
+            <div class="mb-6">
+                <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block tracking-wider">Tool Mode</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="mode-v" class="btn-tool active p-4 rounded-xl flex flex-col items-center" onclick="setMode('v')">
+                        <i class="fa-solid fa-arrows-left-right mb-1 text-lg"></i>
+                        <span class="text-[10px] font-bold">Vertical</span>
+                    </button>
+                    <button id="mode-h" class="btn-tool p-4 rounded-xl flex flex-col items-center" onclick="setMode('h')">
+                        <i class="fa-solid fa-arrows-up-down mb-1 text-lg"></i>
+                        <span class="text-[10px] font-bold">Horizontal</span>
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mb-6">
+                <button id="undo-btn" class="bg-[#2a2a2a] disabled:opacity-30 p-2 rounded-lg text-xs font-bold" onclick="undo()" disabled>Undo</button>
+                <button id="redo-btn" class="bg-[#2a2a2a] disabled:opacity-30 p-2 rounded-lg text-xs font-bold" onclick="redo()" disabled>Redo</button>
+                <button class="col-span-2 text-xs text-red-400 p-2 border border-red-900/30 rounded-lg mt-2 font-bold hover:bg-red-900/10" onclick="clearAll()">Clear All</button>
+            </div>
+            <label class="text-[10px] uppercase font-bold text-gray-500 mb-2 block tracking-wider">Project Layers</label>
+            <div id="layers-list" class="space-y-1"></div>
+        </aside>
+
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <div id="tab-canvas" class="tab-content active">
+                <div class="md:hidden flex p-2 gap-2 bg-[#1e1e1e] border-b border-border items-center shrink-0 z-40">
+                    <button id="m-mode-v" class="flex-1 py-2.5 rounded-lg text-[11px] font-bold btn-tool active" onclick="setMode('v')">Vertical</button>
+                    <button id="m-mode-h" class="flex-1 py-2.5 rounded-lg text-[11px] font-bold btn-tool" onclick="setMode('h')">Horizontal</button>
+                    <button class="w-10 h-10 bg-[#2a2a2a] rounded-lg flex items-center justify-center text-xs" onclick="undo()"><i class="fa-solid fa-rotate-left"></i></button>
+                </div>
+
+                <div class="canvas-container tool-active" id="canvas-container">
+                    <div id="drop-prompt" class="text-center text-gray-600">
+                        <i class="fa-solid fa-mountain-sun text-5xl mb-4 block"></i>
+                        <p class="text-sm font-bold">Upload a photo to start splitting</p>
+                    </div>
+                    <div id="image-wrapper" class="hidden">
+                        <img id="main-img" class="block select-none pointer-events-none">
+                        <div id="overlay" class="absolute inset-0 cursor-none md:cursor-crosshair"></div>
+                        <div id="preview-line" class="preview-line v"></div>
+                        <div id="pos-tip">0%</div>
+                    </div>
+                    <div id="view-mode-hint" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md px-5 py-2.5 rounded-full border border-white/20 text-[11px] font-bold tracking-widest uppercase text-white pointer-events-none hidden shadow-2xl">
+                        <i class="fa-solid fa-eye mr-2 text-blue-400"></i> View Mode (Scroll/Zoom Enabled)
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-layers" class="tab-content bg-[#0e0e0e] overflow-y-auto">
+                <div class="p-4 md:p-8 max-w-4xl mx-auto w-full">
+                    <div class="flex justify-between items-center mb-8">
+                        <h3 class="font-bold text-xl">Segments</h3>
+                        <span id="segment-count" class="text-[11px] font-black bg-blue-500 text-white px-3 py-1 rounded-full">1 PART</span>
+                    </div>
+                    <div id="preview-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-32"></div>
+                    
+                    <div class="fixed bottom-20 left-4 right-4 md:left-auto md:right-8 md:bottom-8 z-50">
+                        <button id="dl-all" class="w-full md:w-72 bg-blue-600 py-4.5 rounded-2xl font-black text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3" onclick="downloadAll()">
+                            <i class="fa-solid fa-file-zipper text-xl"></i> DOWNLOAD ALL (ZIP)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <nav class="mobile-nav h-16 grid grid-cols-2 md:hidden shrink-0 z-50">
+        <button onclick="switchTab('canvas')" id="btn-tab-canvas" class="flex flex-col items-center justify-center text-blue-400">
+            <i class="fa-solid fa-scissors"></i>
+            <span class="text-[9px] mt-1 font-bold uppercase">Editor</span>
+        </button>
+        <button onclick="switchTab('layers')" id="btn-tab-layers" class="flex flex-col items-center justify-center text-gray-500">
+            <i class="fa-solid fa-box-open"></i>
+            <span class="text-[9px] mt-1 font-bold uppercase">Export</span>
+        </button>
+    </nav>
+
+    <script>
+        let currentMode = 'v'; 
+        let imgObj = null;
+        let splits = []; 
+        let history = [[]];
+        let hStep = 0;
+        let isTouching = false;
+
+        const mainImg = document.getElementById('main-img');
+        const overlay = document.getElementById('overlay');
+        const wrapper = document.getElementById('image-wrapper');
+        const prompt = document.getElementById('drop-prompt');
+        const previewLine = document.getElementById('preview-line');
+        const posTip = document.getElementById('pos-tip');
+        const canvasContainer = document.getElementById('canvas-container');
+        const viewModeHint = document.getElementById('view-mode-hint');
+
+        document.getElementById('file-input').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = ev => {
+                    const img = new Image();
+                    img.onload = () => {
+                        imgObj = img;
+                        mainImg.src = ev.target.result;
+                        wrapper.classList.remove('hidden');
+                        prompt.classList.add('hidden');
+                        clearAll();
+                        setMode('v');
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function setMode(mode) {
+            if (currentMode === mode) currentMode = 'view';
+            else currentMode = mode;
+
+            const isView = currentMode === 'view';
+            document.querySelectorAll('.btn-tool').forEach(b => b.classList.remove('active'));
+            
+            if (!isView) {
+                document.getElementById(`mode-${currentMode}`).classList.add('active');
+                const mBtn = document.getElementById(`m-mode-${currentMode}`);
+                if (mBtn) mBtn.classList.add('active');
+                previewLine.className = `preview-line ${currentMode}`;
+                overlay.classList.remove('view-mode');
+                canvasContainer.classList.add('tool-active');
+                viewModeHint.classList.add('hidden');
+            } else {
+                overlay.classList.add('view-mode');
+                canvasContainer.classList.remove('tool-active');
+                viewModeHint.classList.remove('hidden');
+                hidePreview();
+            }
+        }
+
+        function handleInteraction(clientX, clientY, commit = false) {
+            if (!imgObj || currentMode === 'view') return;
+            const rect = overlay.getBoundingClientRect();
+            let pctV = (clientX - rect.left) / rect.width;
+            let pctH = (clientY - rect.top) / rect.height;
+            let pct = currentMode === 'v' ? pctV : pctH;
+            pct = Math.max(0, Math.min(1, pct));
+
+            if (commit) {
+                addSplit(pct);
+                hidePreview();
+            } else {
+                showPreview(pct, pctV, pctH);
+            }
+        }
+
+        function showPreview(pct, pctV, pctH) {
+            if (currentMode === 'view') return;
+            previewLine.style.display = 'block';
+            posTip.style.display = 'block';
+            posTip.textContent = Math.round(pct * 100) + '%';
+            
+            if (currentMode === 'v') {
+                previewLine.style.left = (pct * 100) + '%';
+                previewLine.style.top = '0';
+                posTip.style.left = (pct * 100) + '%';
+                posTip.style.top = (pctH * 100) + '%';
+            } else {
+                previewLine.style.top = (pct * 100) + '%';
+                previewLine.style.left = '0';
+                posTip.style.left = (pctV * 100) + '%';
+                posTip.style.top = (pct * 100) + '%';
+            }
+        }
+
+        function hidePreview() {
+            previewLine.style.display = 'none';
+            posTip.style.display = 'none';
+        }
+
+        overlay.addEventListener('mousemove', e => { if (!isTouching) handleInteraction(e.clientX, e.clientY, false); });
+        overlay.addEventListener('mousedown', e => { handleInteraction(e.clientX, e.clientY, true); });
+        overlay.addEventListener('touchstart', e => {
+            if (currentMode === 'view') return;
+            isTouching = true;
+            handleInteraction(e.touches[0].clientX, e.touches[0].clientY, false);
+        });
+        overlay.addEventListener('touchmove', e => {
+            if (currentMode === 'view') return;
+            handleInteraction(e.touches[0].clientX, e.touches[0].clientY, false);
+            e.preventDefault();
+        }, { passive: false });
+        overlay.addEventListener('touchend', e => {
+            if (currentMode === 'view') return;
+            handleInteraction(e.changedTouches[0].clientX, e.changedTouches[0].clientY, true);
+            isTouching = false;
+        });
+
+        function addSplit(pct) {
+            const newSplit = { id: Date.now(), type: currentMode, percent: pct };
+            history = history.slice(0, hStep + 1);
+            const newState = [...splits, newSplit];
+            history.push(newState);
+            hStep++;
+            update(newState);
+        }
+
+        function update(newState) {
+            splits = newState;
+            renderOverlay();
+            renderLayers();
+            updateHistoryButtons();
+        }
+
+        function renderOverlay() {
+            overlay.innerHTML = '';
+            splits.forEach(s => {
+                const line = document.createElement('div');
+                line.className = `split-line ${s.type}`;
+                if (s.type === 'v') line.style.left = `${s.percent * 100}%`;
+                else line.style.top = `${s.percent * 100}%`;
+                overlay.appendChild(line);
+            });
+        }
+
+        function renderLayers() {
+            const container = document.getElementById('layers-list');
+            if (!container) return;
+            container.innerHTML = '';
+            splits.forEach((s) => {
+                const row = document.createElement('div');
+                row.className = "flex items-center justify-between p-3.5 bg-[#252525] rounded-xl mb-2 text-[11px] font-bold border border-white/5";
+                row.innerHTML = `<span><i class="fa-solid ${s.type === 'v' ? 'fa-grip-lines-vertical' : 'fa-grip-lines'} mr-2 opacity-50"></i> Split @ ${Math.round(s.percent*100)}%</span>
+                    <button onclick="removeLayer(${s.id})" class="text-gray-500 hover:text-red-400 p-1"><i class="fa-solid fa-trash-can"></i></button>`;
+                container.appendChild(row);
+            });
+        }
+
+        function removeLayer(id) {
+            const newState = splits.filter(s => s.id !== id);
+            history = history.slice(0, hStep + 1);
+            history.push(newState);
+            hStep++;
+            update(newState);
+        }
+
+        function undo() { if (hStep > 0) update(history[--hStep]); }
+        function redo() { if (hStep < history.length - 1) update(history[++hStep]); }
+        function updateHistoryButtons() {
+            document.getElementById('undo-btn').disabled = hStep === 0;
+            if (document.getElementById('redo-btn')) document.getElementById('redo-btn').disabled = hStep === history.length - 1;
+        }
+        function clearAll() { history = [[]]; hStep = 0; update([]); }
+
+        function calculateSegments() {
+            if (!imgObj) return [];
+            let vs = [0, imgObj.width], hs = [0, imgObj.height];
+            splits.forEach(s => {
+                if (s.type === 'v') vs.push(s.percent * imgObj.width);
+                else hs.push(s.percent * imgObj.height);
+            });
+            vs.sort((a,b) => a-b); hs.sort((a,b) => a-b);
+            let rects = [];
+            for (let i=0; i < hs.length-1; i++) {
+                for (let j=0; j < vs.length-1; j++) {
+                    rects.push({ x: vs[j], y: hs[i], w: vs[j+1]-vs[j], h: hs[i+1]-hs[i], row: i + 1, col: j + 1 });
+                }
+            }
+            return rects;
+        }
+
+        function generateResults() {
+            const grid = document.getElementById('preview-grid');
+            grid.innerHTML = '';
+            if (!imgObj) return;
+            const segments = calculateSegments();
+            document.getElementById('segment-count').textContent = `${segments.length} PART(S)`;
+            
+            segments.forEach((seg) => {
+                const card = document.createElement('div');
+                card.className = "segment-card";
+                
+                const container = document.createElement('div');
+                container.className = "segment-img-container";
+                
+                // Set the container height based on width to prevent infinite stretching
+                // We assume the card width will be 100% of the grid column
+                // This ensures vertical slices don't look infinite.
+                const aspectRatio = seg.h / seg.w;
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = seg.w;
+                canvas.height = seg.h;
+                const ctx = canvas.getContext('2d', { alpha: false });
+                ctx.drawImage(imgObj, seg.x, seg.y, seg.w, seg.h, 0, 0, seg.w, seg.h);
+                
+                const label = document.createElement('div');
+                label.className = "p-4 text-[10px] font-black uppercase text-gray-500 bg-[#1a1a1a] flex justify-between shrink-0";
+                label.innerHTML = `<span>Part ${seg.row}-${seg.col}</span> <span>${Math.round(seg.w)}x${Math.round(seg.h)}px</span>`;
+
+                container.appendChild(canvas);
+                card.appendChild(container);
+                card.appendChild(label);
+                grid.appendChild(card);
+            });
+        }
+
+        async function downloadAll() {
+            if (!imgObj) return;
+            const segments = calculateSegments();
+            const zip = new JSZip();
+            const btn = document.getElementById('dl-all');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> PREPARING ZIP...';
+            btn.disabled = true;
+            
+            const tempCanvas = document.createElement('canvas');
+            const ctx = tempCanvas.getContext('2d', { alpha: false });
+            
+            for (let seg of segments) {
+                tempCanvas.width = seg.w;
+                tempCanvas.height = seg.h;
+                ctx.drawImage(imgObj, seg.x, seg.y, seg.w, seg.h, 0, 0, seg.w, seg.h);
+                const data = tempCanvas.toDataURL('image/png', 0.9).split(',')[1];
+                zip.file(`slice_${seg.row}_${seg.col}.png`, data, {base64: true});
+            }
+            
+            const blob = await zip.generateAsync({type:"blob"});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `PhotoSplits_${Date.now()}.zip`;
+            link.click();
+            
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+            const btnCanvas = document.getElementById('btn-tab-canvas');
+            const btnLayers = document.getElementById('btn-tab-layers');
+            if (tabId === 'canvas') {
+                btnCanvas.className = "flex flex-col items-center justify-center text-blue-400";
+                btnLayers.className = "flex flex-col items-center justify-center text-gray-500";
+            } else {
+                btnCanvas.className = "flex flex-col items-center justify-center text-gray-500";
+                btnLayers.className = "flex flex-col items-center justify-center text-blue-400";
+                setTimeout(generateResults, 50);
+            }
+        }
+    </script>
+</body>
+</html>
